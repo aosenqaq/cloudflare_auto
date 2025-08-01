@@ -57,40 +57,59 @@ jobs:
           echo "获取到有效IP总数: ${#VALID_IPS[@]}"
           echo "随机选择的IP: $NEW_IP"
 
-      # 3. 验证文件存在
-      - name: Verify File Existence
+      # 3. 验证文件存在并显示内容（增加调试信息）
+      - name: Verify File Existence and Content
         run: |
-          if [ ! -f "ipurl.txt" ]; then
-            echo "错误: ipurl.txt 文件不存在!"
+          FILE_PATH="ipurl.txt"
+          
+          if [ ! -f "$FILE_PATH" ]; then
+            echo "错误: $FILE_PATH 文件不存在!"
             echo "当前目录内容:"
             ls -la
             exit 1
           fi
-          echo "文件验证通过"
+          
+          echo "文件验证通过，当前内容:"
+          cat "$FILE_PATH"
+          echo "文件权限:"
+          ls -l "$FILE_PATH"
 
-      # 4. 更新文件内容
+      # 4. 更新文件内容（优化版）
       - name: Replace IP in File
         run: |
           FILE_PATH="ipurl.txt"
           
-          # 提取当前IP
-          CURRENT_CONTENT=$(head -n 1 "$FILE_PATH")
-          OLD_IP=${CURRENT_CONTENT##*@}  # 获取@符号后的内容
+          # 提取当前内容和IP（更健壮的方式）
+          CURRENT_CONTENT=$(cat "$FILE_PATH")
+          echo "当前文件完整内容: $CURRENT_CONTENT"
           
-          # 验证旧IP格式
-          if ! [[ "$OLD_IP" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "错误：文件中IP格式无效: $OLD_IP"
+          # 使用更灵活的正则表达式提取旧IP
+          if [[ "$CURRENT_CONTENT" =~ @([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+) ]]; then
+            OLD_IP="${BASH_REMATCH[1]}"
+            echo "提取到旧IP: $OLD_IP"
+          else
+            echo "错误：无法从文件中提取旧IP"
             exit 1
           fi
           
-          # 替换IP
-          sed -i "1s|@$OLD_IP|@${{ env.NEW_IP }}|" "$FILE_PATH"
+          # 替换IP（使用更通用的模式）
+          echo "替换 $OLD_IP 为 ${{ env.NEW_IP }}"
+          sed -i.bak "s|$OLD_IP|${{ env.NEW_IP }}|g" "$FILE_PATH"
           
-          echo "文件修改完成:"
-          echo "旧IP: $OLD_IP"
-          echo "新IP: ${{ env.NEW_IP }}"
-          echo "当前文件内容:"
-          head -n 1 "$FILE_PATH"
+          # 删除备份文件
+          rm -f "${FILE_PATH}.bak"
+          
+          echo "文件修改后内容:"
+          cat "$FILE_PATH"
+          
+          # 验证修改是否成功
+          UPDATED_CONTENT=$(cat "$FILE_PATH")
+          if [[ "$UPDATED_CONTENT" == *"${{ env.NEW_IP }}"* ]]; then
+            echo "IP替换成功"
+          else
+            echo "错误：IP替换失败"
+            exit 1
+          fi
 
       # 5. 提交更改
       - name: Commit and Push Changes
