@@ -2,32 +2,49 @@ name: Update Cloudflare Proxy IP
 
 on:
   schedule:
-    - cron: '0 1 * * *'  # 每半时执行一次（UTC时间）
+    - cron: '0 1 * * *'  # 每小时执行一次（UTC时间）
   workflow_dispatch:     # 支持手动触发
 
 jobs:
   update-ip:
     runs-on: ubuntu-latest
     steps:
-      # 1. 检出代码（使用自动生成的GITHUB_TOKEN）
+      # 1. 检出代码
       - name: Checkout Repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      # 2. 获取新的代理IP
+      # 2. 获取新的代理IP（支持多个IP并随机选择）
       - name: Fetch New Proxy IP
         id: get_ip
         run: |
-          # 调用 API 获取新 IP
-          NEW_IP=$(curl -s "https://ipdb.api.030101.xyz/?type=bestproxy")
-          # 验证IP格式
-          if ! [[ "$NEW_IP" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "错误：获取的IP格式无效: $NEW_IP"
+          # 调用 API 获取IP列表
+          IP_LIST=$(curl -s "https://ipdb.api.030101.xyz/?type=bestproxy")
+          
+          # 移除可能的空格并按逗号分割
+          IFS=',' read -ra IPS <<< "$(echo $IP_LIST | tr -d ' ')"
+          
+          # 验证至少有一个有效IP
+          VALID_IPS=()
+          for ip in "${IPS[@]}"; do
+            if [[ "$ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              VALID_IPS+=("$ip")
+            fi
+          done
+          
+          if [ ${#VALID_IPS[@]} -eq 0 ]; then
+            echo "错误：未获取到有效IP: $IP_LIST"
             exit 1
           fi
+          
+          # 随机选择一个IP
+          RANDOM_INDEX=$(( RANDOM % ${#VALID_IPS[@]} ))
+          NEW_IP=${VALID_IPS[$RANDOM_INDEX]}
+          
           echo "NEW_IP=$NEW_IP" >> $GITHUB_ENV
-          echo "获取到新IP: $NEW_IP"
+          echo "获取到IP列表: ${VALID_IPS[*]}"
+          echo "随机选择的IP: $NEW_IP"
 
       # 3. 验证文件存在
       - name: Verify File Existence
@@ -67,18 +84,18 @@ jobs:
       # 5. 提交更改
       - name: Commit and Push Changes
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # 使用自动生成的令牌
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # 配置Git用户
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           
-          # 添加更改
           git add ipurl.txt
           git status
           
-          # 提交更改
-          git commit -m "Auto-Update: Replace proxy IP to ${{ env.NEW_IP }}"
-          
-          # 推送更改（使用GitHub提供的令牌）
-          git push origin HEAD:${{ github.ref }}
+          # 只有在有更改时才提交
+          if git diff --quiet; then
+            echo "没有检测到更改，不需要提交"
+          else
+            git commit -m "Auto-Update: Replace proxy IP to ${{ env.NEW_IP }}"
+            git push origin HEAD:${{ github.ref }}
+          fi
