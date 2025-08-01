@@ -15,26 +15,37 @@ jobs:
         with:
           fetch-depth: 0
 
-      # 2. 获取新的代理IP（支持多个IP并随机选择）
+      # 2. 获取新的代理IP（支持多行IP并随机选择）
       - name: Fetch New Proxy IP
         id: get_ip
         run: |
           # 调用 API 获取IP列表
           IP_LIST=$(curl -s "https://ipdb.api.030101.xyz/?type=bestproxy")
           
-          # 移除可能的空格并按逗号分割
-          IFS=',' read -ra IPS <<< "$(echo $IP_LIST | tr -d ' ')"
+          # 按换行分割IP并清理空行
+          IFS=$'\n' read -ra IPS <<< "$IP_LIST"
           
-          # 验证至少有一个有效IP
+          # 验证并收集有效IP
           VALID_IPS=()
           for ip in "${IPS[@]}"; do
+            # 清理可能的空格
+            ip=$(echo "$ip" | xargs)
+            # 跳过空行
+            if [ -z "$ip" ]; then
+              continue
+            fi
+            # 验证IP格式
             if [[ "$ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
               VALID_IPS+=("$ip")
+            else
+              echo "警告：无效的IP格式: $ip"
             fi
           done
           
+          # 检查是否有有效IP
           if [ ${#VALID_IPS[@]} -eq 0 ]; then
-            echo "错误：未获取到有效IP: $IP_LIST"
+            echo "错误：未获取到有效IP"
+            echo "原始响应: $IP_LIST"
             exit 1
           fi
           
@@ -43,7 +54,7 @@ jobs:
           NEW_IP=${VALID_IPS[$RANDOM_INDEX]}
           
           echo "NEW_IP=$NEW_IP" >> $GITHUB_ENV
-          echo "获取到IP列表: ${VALID_IPS[*]}"
+          echo "获取到有效IP总数: ${#VALID_IPS[@]}"
           echo "随机选择的IP: $NEW_IP"
 
       # 3. 验证文件存在
